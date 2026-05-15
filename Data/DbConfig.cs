@@ -15,6 +15,6 @@ namespace EmpresaApp.Data
         ///   LocalDB (VS):        "Server=(localdb)\\mssqllocaldb;Database=EmpresaApp;Trusted_Connection=True;"
         /// </summary>
         public static string ConnectionString { get; set; } =
-            "Server=(localdb)\\Data;Database=EmpresaApp;Trusted_Connection=True;";
+            "Server=(localdb)\\Servidor;Database=EmpresaApp;Trusted_Connection=True;";
     }
 }
