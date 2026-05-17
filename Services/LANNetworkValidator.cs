@@ -1,5 +1,5 @@
 // ???????????????????????????????????????????????????????????????
-//  LANNetworkValidator.cs — Validate LAN-only access
+//  LANNetworkValidator.cs ï¿½ Validate LAN-only access
 //  ???????????????????????????????????????????????????????????????
 using System;
 using System.Collections.Generic;
@@ -112,6 +112,41 @@ namespace EmpresaApp.Services
         }
 
         /// <summary>
+        /// Nombre del host SQL sin instancia (ej. DESKTOP-PC\SQLEXPRESS -> DESKTOP-PC).
+        /// </summary>
+        public static string GetServerHostName(string dataSource)
+        {
+            if (string.IsNullOrWhiteSpace(dataSource))
+                return "";
+            var host = dataSource.Trim();
+            int slash = host.IndexOf('\\');
+            if (slash >= 0)
+                host = host[..slash];
+            int comma = host.IndexOf(',');
+            if (comma >= 0)
+                host = host[..comma];
+            return host.Trim();
+        }
+
+        /// <summary>
+        /// SQL Server en esta misma maquina (., localhost, nombre del PC, etc.).
+        /// </summary>
+        public bool IsLocalSqlServer(string dataSource)
+        {
+            var host = GetServerHostName(dataSource);
+            if (host.Length == 0)
+                return false;
+
+            if (host == "." ||
+                host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                host.Equals("(local)", StringComparison.OrdinalIgnoreCase) ||
+                host.Contains("(localdb)", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return host.Equals(Environment.MachineName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
         /// Get the server IP from connection string
         /// </summary>
         public string ExtractServerIP(string connectionString)
@@ -121,20 +156,22 @@ namespace EmpresaApp.Services
                 var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString);
                 string server = builder.DataSource ?? "";
 
-                // Handle localhost
-                if (server == "." || server.Contains("(localdb)") || server == "localhost")
+                if (IsLocalSqlServer(server))
                     return "127.0.0.1";
 
-                // Try to resolve hostname
+                string host = GetServerHostName(server);
+
                 try
                 {
-                    var addresses = Dns.GetHostAddresses(server);
-                    if (addresses.Length > 0)
+                    var addresses = Dns.GetHostAddresses(host)
+                        .Where(ip => ip.AddressFamily == AddressFamily.InterNetwork)
+                        .ToList();
+                    if (addresses.Count > 0)
                         return addresses[0].ToString();
                 }
                 catch { }
 
-                return server;
+                return host;
             }
             catch (Exception ex)
             {
@@ -150,15 +187,15 @@ namespace EmpresaApp.Services
         {
             try
             {
-                var serverIP = ExtractServerIP(connectionString);
+                var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString);
+                bool esLocal = IsLocalSqlServer(builder.DataSource ?? "");
 
-                // Try to connect
                 using var conn = new Microsoft.Data.SqlClient.SqlConnection(connectionString);
                 conn.Open();
 
-                // If it's a remote server, check if it's on LAN
-                if (!serverIP.StartsWith("127") && !serverIP.StartsWith("localhost"))
+                if (!esLocal)
                 {
+                    var serverIP = ExtractServerIP(connectionString);
                     if (!IsIPOnLAN(serverIP))
                     {
                         System.Diagnostics.Debug.WriteLine($"Server {serverIP} is not on trusted LAN");
@@ -168,7 +205,7 @@ namespace EmpresaApp.Services
 
                 using var cmd = conn.CreateCommand();
                 cmd.CommandText = "SELECT 1";
-                cmd.CommandTimeout = 3;
+                cmd.CommandTimeout = 5;
                 cmd.ExecuteScalar();
 
                 return true;

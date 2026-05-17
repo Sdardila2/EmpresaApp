@@ -1,5 +1,4 @@
-using System;
-using System.Drawing;
+﻿using System;
 using System.Linq;
 using System.Windows.Forms;
 using EmpresaApp.Data;
@@ -10,196 +9,128 @@ namespace EmpresaApp.Forms
 {
     public class NotificacionesControl : UserControl
     {
-        private Panel panelLista = null!;
+        private ListBox _lista = null!;
 
         public NotificacionesControl()
         {
-            this.BackColor = Colores.Fondo;
-            InitUI();
+            Dock = DockStyle.Fill;
+            BuildUi();
             Cargar();
         }
 
-        private void InitUI()
+        private void BuildUi()
         {
-            var toolbar = new Panel { Dock = DockStyle.Top, Height = 56, BackColor = Color.White };
-            toolbar.Paint += (s, e) => e.Graphics.DrawLine(new Pen(Color.FromArgb(226, 232, 240)), 0, toolbar.Height - 1, toolbar.Width, toolbar.Height - 1);
+            var top = MinimalUi.CreateTopBar();
+            var btn = MinimalUi.CreateButton("Enviar alerta", primary: true);
+            btn.Click += (_, _) => { new EnviarAlertaForm().ShowDialog(); Cargar(); };
+            MinimalUi.AddToBar(top, btn);
 
-            var btnNueva = new Button
-            {
-                Text = "🚨  Enviar Alerta",
-                Location = new Point(10, 10),
-                Size = new Size(155, 36),
-                BackColor = Colores.Alerta,
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
-                Cursor = Cursors.Hand
-            };
-            btnNueva.FlatAppearance.BorderSize = 0;
-            btnNueva.Click += (s, e) =>
-            {
-                var form = new EnviarAlertaForm();
-                form.ShowDialog();
-                Cargar();
-            };
+            _lista = MinimalUi.CreateListBox();
+            _lista.Dock = DockStyle.Fill;
+            _lista.DoubleClick += (_, _) => VerSeleccion();
 
-            toolbar.Controls.Add(btnNueva);
-
-            panelLista = new Panel { Dock = DockStyle.Fill, BackColor = Colores.Fondo, AutoScroll = true, Padding = new Padding(0, 10, 0, 10) };
-
-            this.Controls.Add(panelLista);
-            this.Controls.Add(toolbar);
+            Controls.Add(_lista);
+            Controls.Add(top);
         }
 
         private void Cargar()
         {
-            panelLista.Controls.Clear();
+            _lista.Items.Clear();
             var uid = Session.UsuarioActual?.Id ?? "";
-            List<Notificacion> lista;
-
-            if (Session.EsAdmin)
-                lista = DataManager.ObtenerNotificacionesParaAdmin();
-            else
-                lista = DataManager.ObtenerNotificaciones()
+            var lista = Session.EsAdmin
+                ? DataManager.ObtenerNotificacionesParaAdmin()
+                : DataManager.ObtenerNotificaciones()
                     .Where(n => n.DestinatarioId == uid || string.IsNullOrEmpty(n.DestinatarioId))
-                    .OrderByDescending(n => n.Fecha).ToList();
+                    .OrderByDescending(n => n.Fecha)
+                    .ToList();
 
-            if (lista.Count == 0)
-            {
-                panelLista.Controls.Add(new Label { Text = "No hay notificaciones.", Font = new Font("Segoe UI", 11), ForeColor = Colores.TextoSecundario, Location = new Point(20, 20), AutoSize = true });
-                return;
-            }
-
-            int y = 0;
             foreach (var n in lista)
-            {
-                var card = CrearCard(n, y);
-                panelLista.Controls.Add(card);
-                y += 82;
-            }
+                _lista.Items.Add(new NotifItem(n));
+            if (_lista.Items.Count == 0)
+                _lista.Items.Add("(sin notificaciones)");
         }
 
-        private Panel CrearCard(Notificacion n, int y)
+        private void VerSeleccion()
         {
-            Color colorTipo = n.Tipo == "Urgente" ? Colores.Alerta : n.Tipo == "Alerta" ? Colores.Advertencia : Colores.Secundario;
-            string icono = n.Tipo == "Urgente" ? "🆘" : n.Tipo == "Alerta" ? "⚠️" : "ℹ️";
+            if (_lista.SelectedItem is not NotifItem item) return;
+            DataManager.MarcarNotificacionLeida(item.N.Id);
+            MessageBox.Show(
+                $"{item.N.Tipo}\n{item.N.RemitenteNombre}\n{item.N.Fecha:dd/MM/yyyy HH:mm}\n\n{item.N.Mensaje}",
+                "Notificacion", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            Cargar();
+        }
 
-            var card = new Panel
-            {
-                Location = new Point(0, y),
-                Size = new Size(this.Width - 20, 78),
-                BackColor = n.Leida ? Color.White : Color.FromArgb(255, 247, 237),
-                Cursor = Cursors.Hand,
-                Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
-            card.Paint += (s, e) =>
-            {
-                e.Graphics.FillRectangle(new SolidBrush(colorTipo), 0, 0, 5, card.Height);
-                e.Graphics.DrawLine(new Pen(Color.FromArgb(226, 232, 240)), 0, card.Height - 1, card.Width, card.Height - 1);
-            };
-
-            var lblBadge = new Label
-            {
-                Text = $"{icono} {n.Tipo.ToUpper()}",
-                Font = new Font("Segoe UI", 8, FontStyle.Bold),
-                ForeColor = colorTipo,
-                Location = new Point(15, 8),
-                AutoSize = true
-            };
-            var lblDe = new Label
-            {
-                Text = $"De: {n.RemitenteNombre}  |  {n.RemitenteDepartamento}",
-                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold),
-                ForeColor = Colores.TextoPrimario,
-                Location = new Point(15, 26),
-                AutoSize = true
-            };
-            var lblMsg = new Label
-            {
-                Text = n.Mensaje.Length > 90 ? n.Mensaje.Substring(0, 87) + "..." : n.Mensaje,
-                Font = new Font("Segoe UI", 9),
-                ForeColor = Colores.TextoSecundario,
-                Location = new Point(15, 47),
-                AutoSize = true
-            };
-            var lblFecha = new Label
-            {
-                Text = n.Fecha.ToString("dd/MM/yy HH:mm"),
-                Font = new Font("Segoe UI", 8),
-                ForeColor = Colores.TextoSecundario,
-                Location = new Point(card.Width - 120, 8),
-                AutoSize = true,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right
-            };
-
-            card.Controls.AddRange(new Control[] { lblBadge, lblDe, lblMsg, lblFecha });
-            card.Click += (s, e) =>
-            {
-                DataManager.MarcarNotificacionLeida(n.Id);
-                MessageBox.Show($"📣 {icono} {n.Tipo}\n\nDe: {n.RemitenteNombre} ({n.RemitenteDepartamento})\n{n.Fecha:dd/MM/yyyy HH:mm}\n\n{n.Mensaje}", "Notificación", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                Cargar();
-            };
-
-            return card;
+        private sealed class NotifItem
+        {
+            public Notificacion N { get; }
+            public NotifItem(Notificacion n) => N = n;
+            public override string ToString() =>
+                $"{N.Fecha:dd/MM HH:mm} [{N.Tipo}] {N.RemitenteNombre}: {(N.Mensaje.Length > 50 ? N.Mensaje[..47] + "..." : N.Mensaje)}";
         }
     }
 
     public class EnviarAlertaForm : Form
     {
-        private RichTextBox txtMensaje = null!;
-        private ComboBox cmbTipo = null!;
-
         public EnviarAlertaForm()
         {
-            this.Text = "Enviar Alerta";
-            this.Size = new Size(480, 380);
-            this.StartPosition = FormStartPosition.CenterParent;
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.MaximizeBox = false;
-            this.BackColor = Colores.Fondo;
+            Text = "Enviar alerta";
+            Size = new System.Drawing.Size(420, 280);
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            StartPosition = FormStartPosition.CenterParent;
+            ModernTheme.ApplyToForm(this);
 
-            var pnlHeader = new Panel { Dock = DockStyle.Top, Height = 55, BackColor = Color.FromArgb(185, 28, 28) };
-            new Label { Text = "🚨  Enviar Notificación de Alerta", Font = new Font("Segoe UI", 13, FontStyle.Bold), ForeColor = Color.White, Location = new Point(15, 14), AutoSize = true }.Parent = pnlHeader;
-
-            var lbl1 = new Label { Text = "Nivel de Alerta:", Location = new Point(20, 75), AutoSize = true, ForeColor = Colores.TextoSecundario, Font = new Font("Segoe UI", 9, FontStyle.Bold) };
-            cmbTipo = new ComboBox { Location = new Point(20, 97), Size = new Size(200, 30), DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 10) };
-            cmbTipo.Items.AddRange(new object[] { "Info", "Alerta", "Urgente" });
-            cmbTipo.SelectedIndex = 1;
-
-            var lbl2 = new Label { Text = "Mensaje de Alerta:", Location = new Point(20, 145), AutoSize = true, ForeColor = Colores.TextoSecundario, Font = new Font("Segoe UI", 9, FontStyle.Bold) };
-            txtMensaje = new RichTextBox { Location = new Point(20, 167), Size = new Size(435, 110), Font = new Font("Segoe UI", 10.5f), BorderStyle = BorderStyle.FixedSingle, ScrollBars = RichTextBoxScrollBars.Vertical };
-
-            var lblInfo = new Label
+            var layout = new TableLayoutPanel
             {
-                Text = "⚠️ Esta alerta será enviada a todos los administradores.",
-                Location = new Point(20, 285),
-                Size = new Size(440, 22),
-                Font = new Font("Segoe UI", 8.5f, FontStyle.Italic),
-                ForeColor = Colores.Advertencia
+                Dock = DockStyle.Fill,
+                Padding = new Padding(20, 16, 20, 8),
+                ColumnCount = 2,
+                RowCount = 2
             };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 72));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-            var btnEnviar = new Button { Text = "🚨  Enviar Alerta", Location = new Point(20, 310), Size = new Size(150, 40), BackColor = Colores.Alerta, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10, FontStyle.Bold), Cursor = Cursors.Hand };
-            btnEnviar.FlatAppearance.BorderSize = 0;
-            btnEnviar.Click += (s, e) =>
+            layout.Controls.Add(ModernTheme.CreateLabel("Tipo", ModernTheme.LabelStyle.Caption), 0, 0);
+            var cmb = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+            ModernTheme.StyleComboBox(cmb);
+            cmb.Items.AddRange(new object[] { "Info", "Alerta", "Urgente" });
+            cmb.SelectedIndex = 1;
+            layout.Controls.Add(cmb, 1, 0);
+
+            layout.Controls.Add(ModernTheme.CreateLabel("Texto", ModernTheme.LabelStyle.Caption), 0, 1);
+            var txt = MinimalUi.CreateTextBox(multiline: true);
+            txt.Dock = DockStyle.Fill;
+            layout.Controls.Add(txt, 1, 1);
+
+            var footer = UiLayout.CreateFooterBar();
+            var btnOk = MinimalUi.CreateButton("Enviar", primary: true);
+            var btnNo = MinimalUi.CreateButton("Cancelar");
+            btnNo.Click += (_, _) => Close();
+            btnOk.Click += (_, _) =>
             {
-                if (string.IsNullOrWhiteSpace(txtMensaje.Text)) { MessageBox.Show("Escriba un mensaje.", "Validación", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-                var n = new Notificacion
+                if (string.IsNullOrWhiteSpace(txt.Text))
+                {
+                    MessageBox.Show("Escriba un mensaje.");
+                    return;
+                }
+                DataManager.AgregarNotificacion(new Notificacion
                 {
                     RemitenteId = Session.UsuarioActual!.Id,
                     RemitenteNombre = Session.UsuarioActual.NombreCompleto,
                     RemitenteDepartamento = Session.UsuarioActual.Departamento,
-                    Mensaje = txtMensaje.Text.Trim(),
-                    Tipo = cmbTipo.SelectedItem?.ToString() ?? "Alerta"
-                };
-                DataManager.AgregarNotificacion(n);
-                MessageBox.Show("✅ Alerta enviada a los administradores.", "Éxito", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                this.Close();
+                    Mensaje = txt.Text.Trim(),
+                    Tipo = cmb.SelectedItem?.ToString() ?? "Alerta"
+                });
+                DialogResult = DialogResult.OK;
+                Close();
             };
+            UiLayout.AddFooterButton(footer, btnNo);
+            UiLayout.AddFooterButton(footer, btnOk);
 
-            var btnCancelar = new Button { Text = "Cancelar", Location = new Point(185, 310), Size = new Size(100, 40), FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10), Cursor = Cursors.Hand };
-            btnCancelar.Click += (s, e) => this.Close();
-
-            this.Controls.AddRange(new Control[] { pnlHeader, lbl1, cmbTipo, lbl2, txtMensaje, lblInfo, btnEnviar, btnCancelar });
+            Controls.Add(footer);
+            Controls.Add(layout);
         }
     }
 }

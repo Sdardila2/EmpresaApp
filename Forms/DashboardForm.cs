@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 using EmpresaApp.Data;
@@ -8,268 +9,259 @@ namespace EmpresaApp.Forms
 {
     public class DashboardForm : Form
     {
-        private Panel panelSidebar = null!;
-        private Panel panelContent = null!;
-        private Panel panelHeader = null!;
-        private Label lblTituloPagina = null!;
-        private Label lblNotifBadge = null!;
-        private System.Windows.Forms.Timer timerRefresh = null!;
+        private Panel _contentHost = null!;
+        private Label _pageTitle = null!;
+        private Label _pageSubtitle = null!;
+        private readonly List<(string key, Button btn)> _nav = new();
+        private string? _actual;
 
         public DashboardForm()
         {
-            InitializeComponent();
-            CargarPaginaInicio();
-            IniciarTimer();
+            Text = "EmpresaApp";
+            Size = new Size(1180, 720);
+            MinimumSize = new Size(960, 600);
+            StartPosition = FormStartPosition.CenterScreen;
+            ModernTheme.ApplyToForm(this);
+
+            var sidebar = BuildSidebar();
+            var main = BuildMain();
+
+            Controls.Add(main);
+            Controls.Add(sidebar);
+
+            FormClosing += (_, _) =>
+            {
+                if (Session.UsuarioActual != null)
+                    DataManager.RegistrarSalida(Session.UsuarioActual.Id);
+            };
+
+            if (_nav.Count > 0)
+                IrA(_nav[0].key);
         }
 
-        private void InitializeComponent()
+        private Panel BuildSidebar()
         {
-            this.Text = "EmpresaApp";
-            this.Size = new Size(1200, 750);
-            this.MinimumSize = new Size(1000, 650);
-            this.StartPosition = FormStartPosition.CenterScreen;
-            this.BackColor = Colores.Fondo;
-            this.Font = new Font("Segoe UI", 9.5f);
-
-            // Sidebar
-            panelSidebar = new Panel
+            var side = new Panel
             {
                 Dock = DockStyle.Left,
-                Width = 230,
-                BackColor = Colores.Primario
+                Width = 248,
+                BackColor = ModernTheme.Colors.Surface,
+                Padding = new Padding(16, 20, 16, 16)
+            };
+            ModernTheme.EnableDoubleBuffer(side);
+
+            // Logo
+            var logo = ModernTheme.CreateLabel("EmpresaApp", ModernTheme.LabelStyle.Subheading);
+            logo.Dock = DockStyle.Top;
+            logo.Height = 32;
+            logo.Padding = new Padding(4, 0, 0, 0);
+
+            // Usuario
+            var userCard = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 72,
+                Margin = new Padding(0, 20, 0, 16),
+                BackColor = Color.Transparent
+            };
+            ModernTheme.EnableDoubleBuffer(userCard);
+            userCard.Paint += (_, e) =>
+            {
+                e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                var r = new Rectangle(0, 0, userCard.Width - 1, userCard.Height - 1);
+                using var path = ModernTheme.RoundedRect(r, 8);
+                using var fill = new SolidBrush(ModernTheme.Colors.Elevated);
+                e.Graphics.FillPath(fill, path);
             };
 
-            // Sidebar header user info
-            var pnlUser = new Panel { Dock = DockStyle.Top, Height = 120, BackColor = Color.FromArgb(15, 40, 75) };
-            var lblUserIcon = new Label
-            {
-                Text = Session.EsAdmin ? "👑" : "👤",
-                Font = new Font("Segoe UI Emoji", 26),
-                ForeColor = Color.White,
-                Location = new Point(90, 12),
-                AutoSize = true
-            };
-            var lblUserName = new Label
-            {
-                Text = Session.UsuarioActual?.NombreCompleto ?? "",
-                Font = new Font("Segoe UI", 10, FontStyle.Bold),
-                ForeColor = Color.White,
-                Location = new Point(10, 62),
-                Size = new Size(210, 22),
-                TextAlign = ContentAlignment.MiddleCenter
-            };
-            var lblUserRole = new Label
-            {
-                Text = Session.UsuarioActual?.Rol.ToString() ?? "",
-                Font = new Font("Segoe UI", 8.5f),
-                ForeColor = Color.FromArgb(148, 187, 233),
-                Location = new Point(10, 85),
-                Size = new Size(210, 18),
-                TextAlign = ContentAlignment.MiddleCenter
-            };
-            var lblUserDept = new Label
-            {
-                Text = Session.UsuarioActual?.Departamento ?? "",
-                Font = new Font("Segoe UI", 8),
-                ForeColor = Color.FromArgb(100, 150, 200),
-                Location = new Point(10, 103),
-                Size = new Size(210, 16),
-                TextAlign = ContentAlignment.MiddleCenter
-            };
-            pnlUser.Controls.AddRange(new Control[] { lblUserIcon, lblUserName, lblUserRole, lblUserDept });
+            var u = Session.UsuarioActual;
+            char iniN = !string.IsNullOrEmpty(u?.Nombre) ? char.ToUpper(u.Nombre[0]) : 'U';
+            char iniA = !string.IsNullOrEmpty(u?.Apellido) ? char.ToUpper(u.Apellido[0]) : iniN;
+            string iniciales = $"{iniN}{iniA}";
 
-            // Menu items
-            var menuPanel = new FlowLayoutPanel
+            var avatar = new Panel { Size = new Size(40, 40), Location = new Point(12, 16), BackColor = Color.Transparent };
+            avatar.Paint += (_, e) =>
+            {
+                e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using var b = new SolidBrush(ModernTheme.Colors.AccentMuted);
+                e.Graphics.FillEllipse(b, 0, 0, 38, 38);
+                TextRenderer.DrawText(e.Graphics, iniciales, ModernTheme.FontSubheading,
+                    new Rectangle(0, 0, 38, 38), ModernTheme.Colors.Accent,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            };
+
+            var lblName = ModernTheme.CreateLabel(Session.UsuarioActual?.NombreCompleto ?? "", ModernTheme.LabelStyle.Body);
+            lblName.Location = new Point(60, 18);
+            lblName.MaximumSize = new Size(160, 0);
+            lblName.AutoEllipsis = true;
+
+            var lblRole = ModernTheme.CreateLabel(
+                Session.EsAdmin ? "Administrador" : "Empleado",
+                ModernTheme.LabelStyle.Caption);
+            lblRole.Location = new Point(60, 38);
+
+            userCard.Controls.AddRange(new Control[] { avatar, lblName, lblRole });
+
+            var sep = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = 1,
+                BackColor = ModernTheme.Colors.Border,
+                Margin = new Padding(0, 0, 0, 12)
+            };
+
+            var nav = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 FlowDirection = FlowDirection.TopDown,
                 WrapContents = false,
-                AutoScroll = true,   // scrollbar si menu crece
-                Padding = new Padding(0, 10, 0, 0),
-                BackColor = Colores.Primario
+                AutoScroll = true,
+                BackColor = Color.Transparent
             };
 
-            void AddMenuItem(string icon, string texto, Action accion)
-            {
-                var btn = new Button
-                {
-                    Text = $"  {icon}  {texto}",
-                    Size = new Size(230, 46),
-                    FlatStyle = FlatStyle.Flat,
-                    BackColor = Colores.Primario,
-                    ForeColor = Color.FromArgb(200, 220, 240),
-                    Font = new Font("Segoe UI", 10),
-                    TextAlign = ContentAlignment.MiddleLeft,
-                    Cursor = Cursors.Hand,
-                    Margin = new Padding(0, 1, 0, 1)
-                };
-                btn.FlatAppearance.BorderSize = 0;
-                btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(37, 99, 235);
-                btn.Click += (s, e) => { accion(); ActualizarBadge(); };
-                menuPanel.Controls.Add(btn);
-            }
+            void Nav(string key) => AddNav(nav, key);
 
-            AddMenuItem("🏠", "Inicio", CargarPaginaInicio);
-            AddMenuItem("📨", "Mensajes", CargarMensajes);
-            AddMenuItem("✅", "Mis Tareas", CargarTareas);
-            AddMenuItem("🔔", "Notificaciones", CargarNotificaciones);
-            AddMenuItem("📊", "Reporte Diario", CargarReporte);
-            AddMenuItem("📅", "Mi Asistencia", CargarAsistencia);
+            Nav("Inicio");
+            Nav("Mensajes");
+            Nav("Tareas");
+            Nav("Notificaciones");
+            Nav("Reporte diario");
+            Nav("Mi asistencia");
 
             if (Session.EsAdmin)
             {
-                var sep = new Label { Size = new Size(230, 1), BackColor = Color.FromArgb(50, 80, 120), Margin = new Padding(0, 8, 0, 8) };
-                menuPanel.Controls.Add(sep);
-                var lblAdmin = new Label
-                {
-                    Text = "  ADMINISTRACIÓN",
-                    Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
-                    ForeColor = Color.FromArgb(100, 150, 200),
-                    Size = new Size(230, 24),
-                    TextAlign = ContentAlignment.MiddleLeft
-                };
-                menuPanel.Controls.Add(lblAdmin);
-                AddMenuItem("👥", "Gestión Empleados", CargarGestionEmpleados);
-                AddMenuItem("📋", "Todos los Reportes", CargarTodosReportes);
-                AddMenuItem("📊", "Registro Asistencia", CargarTodaAsistencia);
-                AddMenuItem("📢", "Enviar Comunicado", CargarEnviarComunicado);
+                var adminLbl = ModernTheme.CreateLabel("ADMINISTRACION", ModernTheme.LabelStyle.Caption);
+                adminLbl.Width = 208;
+                adminLbl.Margin = new Padding(6, 20, 0, 6);
+                nav.Controls.Add(adminLbl);
+                Nav("Empleados");
+                Nav("Reportes equipo");
+                Nav("Asistencia equipo");
+                Nav("Enviar mensaje");
             }
 
-            // Badge notificaciones
-            lblNotifBadge = new Label
-            {
-                Text = "",
-                Font = new Font("Segoe UI", 8, FontStyle.Bold),
-                ForeColor = Color.White,
-                BackColor = Colores.Alerta,
-                Size = new Size(0, 0),
-                TextAlign = ContentAlignment.MiddleCenter,
-                Visible = false
-            };
+            var btnSalir = ModernTheme.CreateButton("Cerrar sesion", ModernTheme.ButtonVariant.Ghost);
+            btnSalir.Dock = DockStyle.Bottom;
+            btnSalir.Height = 38;
+            btnSalir.Click += BtnSalir_Click;
 
-            // Bottom logout
-            var btnLogout = new Button
-            {
-                Text = "  🚪  Cerrar Sesión",
-                Dock = DockStyle.Bottom,
-                Height = 46,
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(15, 40, 75),
-                ForeColor = Color.FromArgb(200, 220, 240),
-                Font = new Font("Segoe UI", 10),
-                TextAlign = ContentAlignment.MiddleLeft,
-                Cursor = Cursors.Hand
-            };
-            btnLogout.FlatAppearance.BorderSize = 0;
-            btnLogout.Click += BtnLogout_Click;
+            side.Controls.Add(nav);
+            side.Controls.Add(btnSalir);
+            side.Controls.Add(sep);
+            side.Controls.Add(userCard);
+            side.Controls.Add(logo);
+            return side;
+        }
 
-            panelSidebar.Controls.Add(menuPanel);
-            panelSidebar.Controls.Add(btnLogout);
-            panelSidebar.Controls.Add(pnlUser);
+        private void AddNav(FlowLayoutPanel nav, string key)
+        {
+            var btn = ModernTheme.CreateNavItem(key);
+            btn.Click += (_, _) => IrA(key);
+            nav.Controls.Add(btn);
+            _nav.Add((key, btn));
+        }
 
-            // Header
-            panelHeader = new Panel
+        private Panel BuildMain()
+        {
+            var main = new Panel { Dock = DockStyle.Fill, BackColor = ModernTheme.Colors.Bg };
+
+            var header = new Panel
             {
                 Dock = DockStyle.Top,
-                Height = 64,
-                BackColor = Color.White,
-                Padding = new Padding(20, 0, 20, 0)
+                Height = 76,
+                Padding = new Padding(32, 16, 32, 0),
+                BackColor = ModernTheme.Colors.Bg
             };
-            panelHeader.Paint += (s, e) =>
+
+            var headerText = new Panel { Dock = DockStyle.Fill, BackColor = Color.Transparent };
+
+            _pageTitle = ModernTheme.CreateLabel("Inicio", ModernTheme.LabelStyle.Heading);
+            _pageTitle.Dock = DockStyle.Top;
+            _pageTitle.AutoSize = false;
+            _pageTitle.Height = 28;
+
+            _pageSubtitle = ModernTheme.CreateLabel("", ModernTheme.LabelStyle.Caption);
+            _pageSubtitle.Dock = DockStyle.Top;
+            _pageSubtitle.AutoSize = false;
+            _pageSubtitle.Height = 20;
+
+            var headerBottom = new Panel
             {
-                e.Graphics.DrawLine(new Pen(Color.FromArgb(226, 232, 240), 1),
-                    0, panelHeader.Height - 1, panelHeader.Width, panelHeader.Height - 1);
+                Dock = DockStyle.Bottom,
+                Height = 1,
+                BackColor = ModernTheme.Colors.Border
             };
 
-            lblTituloPagina = new Label
-            {
-                Text = "Inicio",
-                Font = new Font("Segoe UI", 16, FontStyle.Bold),
-                ForeColor = Colores.TextoPrimario,
-                Location = new Point(20, 15),
-                AutoSize = true
-            };
+            headerText.Controls.Add(_pageSubtitle);
+            headerText.Controls.Add(_pageTitle);
+            header.Controls.Add(headerBottom);
+            header.Controls.Add(headerText);
 
-            var lblFecha = new Label
-            {
-                Text = DateTime.Now.ToString("dddd, dd MMMM yyyy", new System.Globalization.CultureInfo("es-ES")),
-                Font = new Font("Segoe UI", 9),
-                ForeColor = Colores.TextoSecundario,
-                Anchor = AnchorStyles.Right | AnchorStyles.Top,
-                AutoSize = true
-            };
-            lblFecha.Location = new Point(this.Width - 230 - 20, 22);
-
-            panelHeader.Controls.Add(lblTituloPagina);
-            panelHeader.Controls.Add(lblFecha);
-
-            // Content
-            panelContent = new Panel
+            _contentHost = new Panel
             {
                 Dock = DockStyle.Fill,
-                BackColor = Colores.Fondo,
-                Padding = new Padding(20),
-                AutoScroll = true  // scrollbar en contenido principal
+                Padding = new Padding(32, 20, 32, 28),
+                BackColor = ModernTheme.Colors.Bg
+            };
+            ModernTheme.EnableDoubleBuffer(_contentHost);
+
+            main.Controls.Add(_contentHost);
+            main.Controls.Add(header);
+            return main;
+        }
+
+        private void IrA(string key)
+        {
+            if (_actual == key) return;
+            _actual = key;
+
+            foreach (var (k, btn) in _nav)
+                ModernTheme.SetNavSelected(btn, k == key);
+
+            _pageTitle.Text = key;
+            _pageSubtitle.Text = key switch
+            {
+                "Inicio" => "Resumen de tu actividad",
+                "Mensajes" or "Tareas" => "Comunicacion interna",
+                "Notificaciones" => "Alertas y avisos",
+                "Reporte diario" => "Informe del dia",
+                "Mi asistencia" or "Asistencia equipo" => "Registro de horarios",
+                "Empleados" => "Gestion del personal",
+                "Reportes equipo" => "Reportes del equipo",
+                "Enviar mensaje" => "Nuevo mensaje o tarea",
+                _ => ""
             };
 
-            this.Controls.Add(panelContent);
-            this.Controls.Add(panelHeader);
-            this.Controls.Add(panelSidebar);
-
-            this.FormClosing += DashboardForm_FormClosing;
-        }
-
-        private void IniciarTimer()
-        {
-            timerRefresh = new System.Windows.Forms.Timer { Interval = 15000 };
-            timerRefresh.Tick += (s, e) => ActualizarBadge();
-            timerRefresh.Start();
-            ActualizarBadge();
-        }
-
-        private void ActualizarBadge()
-        {
-            if (Session.UsuarioActual == null) return;
-            int msgs = DataManager.ContarMensajesNuevos(Session.UsuarioActual.Id);
-            int notifs = DataManager.ContarNotificacionesNoLeidas(Session.UsuarioActual.Id);
-        }
-
-        private void CambiarContenido(Control control, string titulo)
-        {
-            lblTituloPagina.Text = titulo;
-            panelContent.Controls.Clear();
-            control.Dock = DockStyle.Fill;
-            panelContent.Controls.Add(control);
-        }
-
-        private void CargarPaginaInicio() => CambiarContenido(new InicioControl(), "🏠 Panel de Inicio");
-        private void CargarMensajes() => CambiarContenido(new MensajesControl(TipoMensaje_Enum.Mensaje), "📨 Mensajes");
-        private void CargarTareas() => CambiarContenido(new MensajesControl(TipoMensaje_Enum.Tarea), "✅ Mis Tareas");
-        private void CargarNotificaciones() => CambiarContenido(new NotificacionesControl(), "🔔 Notificaciones");
-        private void CargarReporte() => CambiarContenido(new ReporteControl(), "📊 Reporte Diario");
-        private void CargarAsistencia() => CambiarContenido(new AsistenciaControl(false), "📅 Mi Asistencia");
-        private void CargarGestionEmpleados() => CambiarContenido(new GestionEmpleadosControl(), "👥 Gestión de Empleados");
-        private void CargarTodosReportes() => CambiarContenido(new TodosReportesControl(), "📋 Reportes del Equipo");
-        private void CargarTodaAsistencia() => CambiarContenido(new AsistenciaControl(true), "📊 Registro de Asistencia");
-        private void CargarEnviarComunicado() => CambiarContenido(new EnviarMensajeControl(), "📢 Nuevo Mensaje / Tarea");
-
-        private void BtnLogout_Click(object? sender, EventArgs e)
-        {
-            if (MessageBox.Show("¿Desea cerrar sesión?", "Confirmar", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+            Control? ctrl = key switch
             {
-                if (Session.UsuarioActual != null)
-                    DataManager.RegistrarSalida(Session.UsuarioActual.Id);
-                timerRefresh.Stop();
-                Session.Cerrar();
-                this.Close();
-            }
+                "Inicio" => new InicioControl(),
+                "Mensajes" => new MensajesControl(TipoMensaje_Enum.Mensaje),
+                "Tareas" => new MensajesControl(TipoMensaje_Enum.Tarea),
+                "Notificaciones" => new NotificacionesControl(),
+                "Reporte diario" => new ReporteControl(),
+                "Mi asistencia" => new AsistenciaControl(false),
+                "Empleados" => new GestionEmpleadosControl(),
+                "Reportes equipo" => new TodosReportesControl(),
+                "Asistencia equipo" => new AsistenciaControl(true),
+                "Enviar mensaje" => new EnviarMensajeControl(),
+                _ => null
+            };
+
+            if (ctrl == null) return;
+            if (ctrl is UserControl uc) ModernTheme.ApplyToUserControl(uc);
+            ModernTheme.SwapContent(_contentHost, ctrl);
+            Text = $"EmpresaApp — {key}";
         }
 
-        private void DashboardForm_FormClosing(object? sender, FormClosingEventArgs e)
+        private void BtnSalir_Click(object? sender, EventArgs e)
         {
+            if (MessageBox.Show("¿Cerrar sesion?", "Confirmar",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
             if (Session.UsuarioActual != null)
                 DataManager.RegistrarSalida(Session.UsuarioActual.Id);
-            timerRefresh?.Stop();
+            Session.Cerrar();
+            Close();
         }
     }
 

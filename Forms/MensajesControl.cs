@@ -1,12 +1,5 @@
-// ═══════════════════════════════════════════════════════════════
-//  MensajesControl.cs
-//  — Empleados NO pueden enviar mensajes ni tareas (solo recibir)
-//  — Destinatario individual agrupado por departamento en ComboBox
-//  — Destinatario grupal: ComboBox de departamentos desde SQL
-// ═══════════════════════════════════════════════════════════════
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
 using EmpresaApp.Data;
@@ -18,507 +11,315 @@ namespace EmpresaApp.Forms
     public class MensajesControl : UserControl
     {
         private readonly TipoMensaje_Enum _tipoFiltro;
-        private Panel _panelLista   = null!;
-        private Panel _panelDetalle = null!;
+        private ListBox _lista = null!;
+        private TextBox _detalle = null!;
+        private List<Mensaje> _mensajes = new();
 
         public MensajesControl(TipoMensaje_Enum tipo)
         {
             _tipoFiltro = tipo;
-            this.BackColor = Colores.Fondo;
-            InitUI();
-            CargarMensajes();
+            Dock = DockStyle.Fill;
+            BuildUi();
+            Cargar();
         }
 
-        private void InitUI()
+        private void BuildUi()
         {
-            var toolbar = new Panel { Dock = DockStyle.Top, Height = 56, BackColor = Color.White };
-            toolbar.Paint += (s, e) => e.Graphics.DrawLine(
-                new Pen(Color.FromArgb(226, 232, 240)), 0, toolbar.Height - 1, toolbar.Width, toolbar.Height - 1);
-
-            // Solo administradores pueden enviar mensajes / tareas
+            var top = MinimalUi.CreateTopBar();
             if (Session.EsAdmin)
             {
-                var btnNuevo = new Button
-                {
-                    Text      = _tipoFiltro == TipoMensaje_Enum.Tarea ? "➕ Nueva Tarea" : "✉️ Nuevo Mensaje",
-                    Location  = new Point(10, 10), Size = new Size(155, 36),
-                    BackColor = Colores.Secundario, ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
-                    Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), Cursor = Cursors.Hand
-                };
-                btnNuevo.FlatAppearance.BorderSize = 0;
-                btnNuevo.Click += (s, e) => AbrirEnviarMensaje();
-                toolbar.Controls.Add(btnNuevo);
-
-                var btnGrafo = new Button
-                {
-                    Text      = "📊 Ver Grafo",
-                    Location  = new Point(175, 10), Size = new Size(120, 36),
-                    BackColor = Colores.Primario, ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
-                    Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), Cursor = Cursors.Hand
-                };
-                btnGrafo.FlatAppearance.BorderSize = 0;
-                btnGrafo.Click += (s, e) => new GrafoMensajeriaForm().ShowDialog();
-                toolbar.Controls.Add(btnGrafo);
-            }
-            else
-            {
-                // Mensaje informativo para empleados
-                toolbar.Controls.Add(new Label
-                {
-                    Text      = _tipoFiltro == TipoMensaje_Enum.Tarea
-                                    ? "📋 Tus tareas asignadas (solo lectura)"
-                                    : "📨 Tus mensajes recibidos (solo lectura)",
-                    Location  = new Point(12, 18),
-                    AutoSize  = true,
-                    Font      = new Font("Segoe UI", 10, FontStyle.Italic),
-                    ForeColor = Colores.TextoSecundario
-                });
+                var btnNuevo = MinimalUi.CreateButton(_tipoFiltro == TipoMensaje_Enum.Tarea ? "Nueva tarea" : "Nuevo", primary: true);
+                btnNuevo.Click += (_, _) => AbrirEnviar();
+                MinimalUi.AddToBar(top, btnNuevo);
+                var btnGrafo = MinimalUi.CreateButton("Grafo");
+                btnGrafo.Click += (_, _) => new GrafoMensajeriaForm().ShowDialog();
+                MinimalUi.AddToBar(top, btnGrafo);
             }
 
-            var split = new SplitContainer
-            {
-                Dock = DockStyle.Fill, SplitterDistance = 340, BorderStyle = BorderStyle.None
-            };
+            var split = new SplitContainer { Dock = DockStyle.Fill, SplitterDistance = 280 };
+            ModernTheme.StyleSplitContainer(split);
+            _lista = MinimalUi.CreateListBox();
+            _lista.Dock = DockStyle.Fill;
+            _lista.SelectedIndexChanged += (_, _) => MostrarDetalle();
+            _detalle = MinimalUi.CreateTextBox(multiline: true);
+            _detalle.ReadOnly = true;
+            _detalle.Font = new System.Drawing.Font("Consolas", 9.5f);
+            _detalle.Dock = DockStyle.Fill;
+            split.Panel1.Controls.Add(_lista);
+            split.Panel2.Controls.Add(_detalle);
 
-            _panelLista = new Panel
-            { Dock = DockStyle.Fill, BackColor = Color.White, AutoScroll = true };
-            _panelDetalle = new Panel
-            { Dock = DockStyle.Fill, BackColor = Colores.Fondo, AutoScroll = true, Padding = new Padding(20) };
-
-            split.Panel1.Controls.Add(_panelLista);
-            split.Panel2.Controls.Add(_panelDetalle);
-            MostrarBienvenidaDetalle();
-
-            this.Controls.Add(split);
-            this.Controls.Add(toolbar);
+            Controls.Add(split);
+            Controls.Add(top);
         }
 
-        private void CargarMensajes()
+        private void Cargar()
         {
-            _panelLista.Controls.Clear();
-            var uid      = Session.UsuarioActual?.Id ?? "";
-            var mensajes = DataManager.ObtenerMensajesDeUsuario(uid)
+            var uid = Session.UsuarioActual?.Id ?? "";
+            _mensajes = DataManager.ObtenerMensajesDeUsuario(uid)
                 .Where(m => _tipoFiltro == TipoMensaje_Enum.Tarea
                     ? m.Tipo == TipoMensaje.Tarea
                     : m.Tipo == TipoMensaje.Mensaje || m.Tipo == TipoMensaje.Alerta)
+                .OrderByDescending(m => m.FechaEnvio)
                 .ToList();
 
-            if (mensajes.Count == 0)
+            _lista.Items.Clear();
+            foreach (var m in _mensajes)
+                _lista.Items.Add($"{m.FechaEnvio:dd/MM HH:mm} | {m.RemitenteNombre} | {m.Asunto}");
+            if (_lista.Items.Count == 0)
+                _detalle.Text = _tipoFiltro == TipoMensaje_Enum.Tarea ? "Sin tareas." : "Sin mensajes.";
+            else
             {
-                _panelLista.Controls.Add(new Label
-                {
-                    Text      = _tipoFiltro == TipoMensaje_Enum.Tarea ? "No tienes tareas asignadas." : "No tienes mensajes.",
-                    Font      = new Font("Segoe UI", 10), ForeColor = Colores.TextoSecundario,
-                    Location  = new Point(15, 20), AutoSize = true
-                });
+                _lista.SelectedIndex = 0;
+                MostrarDetalle();
+            }
+        }
+
+        private void MostrarDetalle()
+        {
+            if (_lista.SelectedIndex < 0 || _lista.SelectedIndex >= _mensajes.Count)
+            {
+                _detalle.Text = "Seleccione un elemento.";
                 return;
             }
 
-            int y = 0;
-            foreach (var m in mensajes)
-            {
-                var card = CrearCardMensaje(m, y);
-                _panelLista.Controls.Add(card);
-                y += 72;
-            }
-        }
-
-        private Panel CrearCardMensaje(Mensaje m, int y)
-        {
-            bool  esNuevo    = m.Estado == EstadoMensaje.Nuevo;
-            Color colorBorde = m.Tipo == TipoMensaje.Alerta ? Colores.Alerta : m.Tipo == TipoMensaje.Tarea ? Colores.Advertencia : Colores.Secundario;
-            string icono     = m.Tipo == TipoMensaje.Tarea ? "✅" : m.Tipo == TipoMensaje.Alerta ? "🚨" : "📩";
-            string badge     = m.Estado == EstadoMensaje.Completado ? "HECHO" : m.Estado == EstadoMensaje.Nuevo ? "NUEVO" : "";
-            string sufijo    = m.TipoDestino == TipoDestino.Departamento ? $"  [📢 {m.DepartamentoDestino}]" : "";
-
-            var card = new Panel
-            {
-                Location = new Point(0, y), Size = new Size(_panelLista.Width > 0 ? _panelLista.Width - 1 : 340, 70),
-                BackColor = esNuevo ? Color.FromArgb(239, 246, 255) : Color.White,
-                Cursor = Cursors.Hand, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
-            };
-            card.Paint += (s, e) =>
-            {
-                e.Graphics.FillRectangle(new SolidBrush(colorBorde), 0, 0, 4, card.Height);
-                e.Graphics.DrawLine(new Pen(Color.FromArgb(226, 232, 240)), 0, card.Height - 1, card.Width, card.Height - 1);
-            };
-
-            card.Controls.Add(new Label { Text = $"{icono} {m.RemitenteNombre}{sufijo}", Font = new Font("Segoe UI", 9.5f, esNuevo ? FontStyle.Bold : FontStyle.Regular), ForeColor = Colores.TextoPrimario, Location = new Point(12, 8), AutoSize = true });
-            card.Controls.Add(new Label { Text = m.Asunto.Length > 38 ? m.Asunto[..35] + "..." : m.Asunto, Font = new Font("Segoe UI", 9), ForeColor = Colores.TextoSecundario, Location = new Point(12, 28), AutoSize = true });
-            card.Controls.Add(new Label { Text = m.FechaEnvio.ToString("dd/MM HH:mm"), Font = new Font("Segoe UI", 7.5f), ForeColor = Colores.TextoSecundario, Location = new Point(12, 50), AutoSize = true });
-
-            if (!string.IsNullOrEmpty(badge))
-                card.Controls.Add(new Label { Text = badge, Font = new Font("Segoe UI", 7, FontStyle.Bold), ForeColor = Color.White, BackColor = m.Estado == EstadoMensaje.Completado ? Colores.Acento : colorBorde, Size = new Size(50, 18), Location = new Point(card.Width - 65, 8), TextAlign = ContentAlignment.MiddleCenter, Anchor = AnchorStyles.Right | AnchorStyles.Top });
-
-            card.Click += (s, e) => MostrarDetalleMensaje(m);
-            foreach (Control c in card.Controls) c.Click += (s, e) => MostrarDetalleMensaje(m);
-            return card;
-        }
-
-        private void MostrarBienvenidaDetalle()
-        {
-            _panelDetalle.Controls.Clear();
-            _panelDetalle.Controls.Add(new Label { Text = "← Selecciona un mensaje para verlo", Font = new Font("Segoe UI", 11), ForeColor = Colores.TextoSecundario, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter });
-        }
-
-        private void MostrarDetalleMensaje(Mensaje m)
-        {
+            var m = _mensajes[_lista.SelectedIndex];
             DataManager.MarcarMensajeLeido(m.Id);
-            m.Estado = EstadoMensaje.Leido;
-            CargarMensajes();
 
-            _panelDetalle.Controls.Clear();
-            string icono     = m.Tipo == TipoMensaje.Tarea ? "✅" : m.Tipo == TipoMensaje.Alerta ? "🚨" : "📩";
-            Color  colorTipo = m.Tipo == TipoMensaje.Alerta ? Colores.Alerta : m.Tipo == TipoMensaje.Tarea ? Colores.Advertencia : Colores.Secundario;
-
-            var pnlDetalle = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(25), AutoScroll = true };
-            pnlDetalle.Controls.Add(new Label { Text = $"{icono} {m.Tipo}", Font = new Font("Segoe UI", 10, FontStyle.Bold), ForeColor = colorTipo, Location = new Point(25, 20), AutoSize = true });
-            pnlDetalle.Controls.Add(new Label { Text = m.Asunto, Font = new Font("Segoe UI", 15, FontStyle.Bold), ForeColor = Colores.TextoPrimario, Location = new Point(25, 45), Size = new Size(500, 40), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right });
-
-            var pnlMeta = new Panel { Location = new Point(25, 95), Size = new Size(500, m.TipoDestino == TipoDestino.Departamento ? 80 : 60), BackColor = Color.FromArgb(248, 250, 252), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
-            pnlMeta.Paint += (s, e) => e.Graphics.DrawRectangle(new Pen(Color.FromArgb(226, 232, 240)), 0, 0, pnlMeta.Width - 1, pnlMeta.Height - 1);
-            pnlMeta.Controls.Add(new Label { Text = $"👤 De: {m.RemitenteNombre}", Font = new Font("Segoe UI", 9.5f), ForeColor = Colores.TextoPrimario, Location = new Point(12, 8), AutoSize = true });
-            if (m.TipoDestino == TipoDestino.Departamento)
-                pnlMeta.Controls.Add(new Label { Text = $"📢 Enviado al departamento: {m.DepartamentoDestino}", Font = new Font("Segoe UI", 9, FontStyle.Bold), ForeColor = Colores.Secundario, Location = new Point(12, 30), AutoSize = true });
-            pnlMeta.Controls.Add(new Label { Text = $"📅 {m.FechaEnvio:dddd, dd 'de' MMMM yyyy 'a las' HH:mm}", Font = new Font("Segoe UI", 9), ForeColor = Colores.TextoSecundario, Location = new Point(12, m.TipoDestino == TipoDestino.Departamento ? 54 : 30), AutoSize = true });
-
-            pnlDetalle.Controls.Add(pnlMeta);
-            pnlDetalle.Controls.Add(new Label { Text = "Contenido:", Font = new Font("Segoe UI", 9, FontStyle.Bold), ForeColor = Colores.TextoSecundario, Location = new Point(25, 190), AutoSize = true });
-            pnlDetalle.Controls.Add(new RichTextBox { Text = m.Contenido, ReadOnly = true, Location = new Point(25, 215), Size = new Size(500, 160), Font = new Font("Segoe UI", 10.5f), BackColor = Color.FromArgb(248, 250, 252), BorderStyle = BorderStyle.None, ScrollBars = RichTextBoxScrollBars.Vertical, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right });
-
-            // Botón responder SOLO para administradores
-            if (Session.EsAdmin)
-            {
-                var btnResponder = new Button
-                {
-                    Text = "↩️  Responder", Location = new Point(25, 390), Size = new Size(140, 38),
-                    BackColor = Colores.Secundario, ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
-                    Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), Cursor = Cursors.Hand,
-                    Enabled = m.TipoDestino == TipoDestino.Individual
-                };
-                btnResponder.FlatAppearance.BorderSize = 0;
-                btnResponder.Click += (s, e) => AbrirEnviarMensaje(m.RemitenteId, m.RemitenteNombre, $"Re: {m.Asunto}");
-                pnlDetalle.Controls.Add(btnResponder);
-            }
+            _detalle.Text =
+                $"Tipo: {m.Tipo}\r\nDe: {m.RemitenteNombre}\r\nFecha: {m.FechaEnvio:yyyy-MM-dd HH:mm}\r\n" +
+                $"Asunto: {m.Asunto}\r\n\r\n{m.Contenido}";
 
             if (m.Tipo == TipoMensaje.Tarea && m.Estado != EstadoMensaje.Completado)
             {
-                var btnCompletar = new Button
-                {
-                    Text = "✅ Marcar Completada",
-                    Location = Session.EsAdmin ? new Point(180, 390) : new Point(25, 390),
-                    Size = new Size(175, 38),
-                    BackColor = Colores.Acento, ForeColor = Color.White, FlatStyle = FlatStyle.Flat,
-                    Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), Cursor = Cursors.Hand
-                };
-                btnCompletar.FlatAppearance.BorderSize = 0;
-                btnCompletar.Click += (s, e) =>
+                var r = MessageBox.Show("Marcar tarea como completada?", "Tarea",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                if (r == DialogResult.Yes)
                 {
                     DataManager.MarcarTareaCompletada(m.Id);
-                    MessageBox.Show("✅ Tarea marcada como completada.", "Éxito", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    CargarMensajes();
-                    MostrarBienvenidaDetalle();
-                };
-                pnlDetalle.Controls.Add(btnCompletar);
+                    Cargar();
+                }
             }
-
-            _panelDetalle.Controls.Add(pnlDetalle);
         }
 
-        private void AbrirEnviarMensaje(string? destId = null, string? destNombre = null, string? asunto = null)
+        private void AbrirEnviar()
         {
             var tipo = _tipoFiltro == TipoMensaje_Enum.Tarea ? TipoMensaje.Tarea : TipoMensaje.Mensaje;
-            new EnviarMensajeForm(destId, destNombre, asunto, tipo).ShowDialog();
-            CargarMensajes();
+            new EnviarMensajeForm(null, null, null, tipo).ShowDialog();
+            Cargar();
         }
     }
 
-    // ─────────────────────────────────────────────────────────
-    //  Formulario de redacción (solo accesible para admins)
-    //  Destinatario individual agrupado por departamento
-    // ─────────────────────────────────────────────────────────
     public class EnviarMensajeForm : Form
     {
-        private RadioButton  _rbIndividual    = null!;
-        private RadioButton  _rbDepartamento  = null!;
-        private ComboBox     _cmbDestinatario = null!;
-        private ComboBox     _cmbDepartamento = null!;
-        private Panel        _pnlIndividual   = null!;
-        private Panel        _pnlDepartamento = null!;
-        private TextBox      _txtAsunto       = null!;
-        private RichTextBox  _txtContenido    = null!;
-        private ComboBox     _cmbTipo         = null!;
-        private DateTimePicker _dtpVencimiento= null!;
-        private CheckBox     _chkVencimiento  = null!;
-        private readonly TipoMensaje _tipoInicial;
+        private RadioButton _rbIndividual = null!, _rbDepto = null!;
+        private ComboBox _cmbUser = null!, _cmbDepto = null!, _cmbTipo = null!;
+        private TextBox _txtAsunto = null!, _txtCuerpo = null!;
+        private CheckBox _chkVence = null!;
+        private DateTimePicker _dtpVence = null!;
 
-        public EnviarMensajeForm(string? destId = null, string? destNombre = null,
-                                  string? asunto = null, TipoMensaje tipo = TipoMensaje.Mensaje)
+        public EnviarMensajeForm(string? destId, string? destNombre, string? asunto, TipoMensaje tipoInicial)
         {
-            _tipoInicial = tipo;
-            InitUI(destId, destNombre, asunto);
-        }
+            Text = "Enviar";
+            Size = new System.Drawing.Size(460, 440);
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            StartPosition = FormStartPosition.CenterParent;
+            ModernTheme.ApplyToForm(this);
 
-        private void InitUI(string? destId, string? destNombre, string? asunto)
-        {
-            this.Text = "Nuevo Mensaje / Tarea";
-            this.Size = new Size(560, 640);
-            this.StartPosition = FormStartPosition.CenterParent;
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.MaximizeBox = false;
-            this.BackColor = Colores.Fondo;
-
-            var pnlHeader = new Panel { Dock = DockStyle.Top, Height = 55, BackColor = Colores.Primario };
-            new Label { Text = "✉️  Redactar Mensaje / Tarea", Font = new Font("Segoe UI", 13, FontStyle.Bold), ForeColor = Color.White, Location = new Point(15, 14), AutoSize = true }.Parent = pnlHeader;
-
-            var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(0, 55, 0, 0) };
-            int y = 0;
-
-            // ── Tipo de destino ────────────────────────────────
-            new Label { Text = "Tipo de envío:", Location = new Point(20, y), AutoSize = true, ForeColor = Colores.TextoSecundario, Font = new Font("Segoe UI", 9, FontStyle.Bold) }.Parent = scroll;
-            _rbIndividual   = new RadioButton { Text = "👤 Individual",       Location = new Point(20,  y + 20), AutoSize = true, Checked = true, Font = new Font("Segoe UI", 10) };
-            _rbDepartamento = new RadioButton { Text = "📢 Por departamento", Location = new Point(145, y + 20), AutoSize = true, Font = new Font("Segoe UI", 10) };
-            _rbIndividual.CheckedChanged   += (s, e) => AlternarDestino();
-            _rbDepartamento.CheckedChanged += (s, e) => AlternarDestino();
-            scroll.Controls.Add(_rbIndividual);
-            scroll.Controls.Add(_rbDepartamento);
-            y += 52;
-
-            // ── Panel individual: ComboBox agrupado por depto ──
-            _pnlIndividual = new Panel { Location = new Point(20, y), Size = new Size(510, 80), BackColor = Color.Transparent };
-            new Label { Text = "Para (usuario):", Location = new Point(0, 0), AutoSize = true, ForeColor = Colores.TextoSecundario, Font = new Font("Segoe UI", 9, FontStyle.Bold) }.Parent = _pnlIndividual;
-            _cmbDestinatario = new ComboBox { Location = new Point(0, 20), Size = new Size(510, 30), DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 10) };
-
-            // Agregar usuarios agrupados por departamento
-            var usuarios = DataManager.ObtenerUsuarios()
-                .Where(u => u.Activo && u.Id != Session.UsuarioActual?.Id)
-                .OrderBy(u => string.IsNullOrWhiteSpace(u.Departamento) ? "zzz" : u.Departamento)
-                .ThenBy(u => u.NombreCompleto)
-                .ToList();
-
-            var grupos = usuarios.GroupBy(u => string.IsNullOrWhiteSpace(u.Departamento) ? "Sin departamento" : u.Departamento);
-            foreach (var grupo in grupos)
+            var layout = new TableLayoutPanel
             {
-                _cmbDestinatario.Items.Add(new ComboSeparador($"── {grupo.Key} ──"));
-                foreach (var u in grupo)
-                    _cmbDestinatario.Items.Add(new ComboItem(u.Id, $"{u.NombreCompleto} ({u.Cargo})"));
-            }
-
-            // Evitar seleccionar separadores
-            _cmbDestinatario.SelectedIndexChanged += (s, e) =>
-            {
-                if (_cmbDestinatario.SelectedItem is ComboSeparador)
-                    _cmbDestinatario.SelectedIndex = -1;
+                Dock = DockStyle.Fill,
+                Padding = new Padding(20, 16, 20, 8),
+                ColumnCount = 2,
+                RowCount = 7
             };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 88));
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+
+            _rbIndividual = new RadioButton { Text = "Usuario", Checked = true, AutoSize = true, ForeColor = ModernTheme.Colors.Text };
+            _rbDepto = new RadioButton { Text = "Departamento", AutoSize = true, ForeColor = ModernTheme.Colors.Text };
+            var pRadio = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, WrapContents = false };
+            pRadio.Controls.Add(_rbIndividual);
+            pRadio.Controls.Add(_rbDepto);
+            layout.Controls.Add(pRadio, 0, 0);
+            layout.SetColumnSpan(pRadio, 2);
+
+            _cmbUser = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+            ModernTheme.StyleComboBox(_cmbUser);
+            foreach (var u in DataManager.ObtenerUsuarios().Where(u => u.Activo && u.Id != Session.UsuarioActual?.Id))
+                _cmbUser.Items.Add(new ComboItem(u.Id, u.NombreCompleto));
+            _cmbDepto = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList, Visible = false };
+            ModernTheme.StyleComboBox(_cmbDepto);
+            foreach (var d in DataManager.ObtenerDepartamentos()) _cmbDepto.Items.Add(d.Nombre);
+            if (_cmbDepto.Items.Count > 0) _cmbDepto.SelectedIndex = 0;
+
+            var pPara = new Panel { Dock = DockStyle.Fill };
+            _cmbUser.Dock = DockStyle.Fill;
+            _cmbDepto.Dock = DockStyle.Fill;
+            pPara.Controls.Add(_cmbUser);
+            pPara.Controls.Add(_cmbDepto);
+            layout.Controls.Add(ModernTheme.CreateLabel("Para", ModernTheme.LabelStyle.Caption), 0, 1);
+            layout.Controls.Add(pPara, 1, 1);
+
+            _cmbTipo = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+            ModernTheme.StyleComboBox(_cmbTipo);
+            _cmbTipo.Items.AddRange(new object[] { "Mensaje", "Tarea", "Alerta" });
+            _cmbTipo.SelectedIndex = tipoInicial == TipoMensaje.Tarea ? 1 : tipoInicial == TipoMensaje.Alerta ? 2 : 0;
+            layout.Controls.Add(ModernTheme.CreateLabel("Tipo", ModernTheme.LabelStyle.Caption), 0, 2);
+            layout.Controls.Add(_cmbTipo, 1, 2);
+
+            _txtAsunto = MinimalUi.CreateTextBox();
+            _txtAsunto.Dock = DockStyle.Fill;
+            if (asunto != null) _txtAsunto.Text = asunto;
+            layout.Controls.Add(ModernTheme.CreateLabel("Asunto", ModernTheme.LabelStyle.Caption), 0, 3);
+            layout.Controls.Add(_txtAsunto, 1, 3);
+
+            _txtCuerpo = MinimalUi.CreateTextBox(multiline: true);
+            _txtCuerpo.Dock = DockStyle.Fill;
+            layout.Controls.Add(ModernTheme.CreateLabel("Texto", ModernTheme.LabelStyle.Caption), 0, 4);
+            layout.Controls.Add(_txtCuerpo, 1, 4);
+
+            _chkVence = new CheckBox { Text = "Vence", AutoSize = true, ForeColor = ModernTheme.Colors.Text };
+            _dtpVence = new DateTimePicker { Enabled = false, Width = 140 };
+            ModernTheme.StyleDateTimePicker(_dtpVence);
+            _chkVence.CheckedChanged += (_, _) => _dtpVence.Enabled = _chkVence.Checked;
+            var pV = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false };
+            pV.Controls.Add(_chkVence);
+            pV.Controls.Add(_dtpVence);
+            layout.Controls.Add(pV, 0, 5);
+            layout.SetColumnSpan(pV, 2);
+
+            _rbIndividual.CheckedChanged += (_, _) => Alternar();
+            _rbDepto.CheckedChanged += (_, _) => Alternar();
+            Alternar();
 
             if (destId != null)
-                for (int i = 0; i < _cmbDestinatario.Items.Count; i++)
-                    if ((_cmbDestinatario.Items[i] as ComboItem)?.Id == destId)
-                    { _cmbDestinatario.SelectedIndex = i; break; }
+                for (int i = 0; i < _cmbUser.Items.Count; i++)
+                    if ((_cmbUser.Items[i] as ComboItem)?.Id == destId)
+                        _cmbUser.SelectedIndex = i;
 
-            _pnlIndividual.Controls.Add(_cmbDestinatario);
-            scroll.Controls.Add(_pnlIndividual);
+            var footer = UiLayout.CreateFooterBar();
+            var btnOk = MinimalUi.CreateButton("Enviar", primary: true);
+            var btnNo = MinimalUi.CreateButton("Cancelar");
+            btnNo.Click += (_, _) => Close();
+            btnOk.Click += (_, _) => Enviar();
+            UiLayout.AddFooterButton(footer, btnNo);
+            UiLayout.AddFooterButton(footer, btnOk);
 
-            // ── Panel departamento: ComboBox desde SQL ─────────
-            _pnlDepartamento = new Panel { Location = new Point(20, y), Size = new Size(510, 80), BackColor = Color.Transparent, Visible = false };
-            new Label { Text = "Para (departamento):", Location = new Point(0, 0), AutoSize = true, ForeColor = Colores.TextoSecundario, Font = new Font("Segoe UI", 9, FontStyle.Bold) }.Parent = _pnlDepartamento;
-            _cmbDepartamento = new ComboBox { Location = new Point(0, 20), Size = new Size(300, 30), DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 10) };
-            foreach (var d in DataManager.ObtenerDepartamentos()) _cmbDepartamento.Items.Add(d.Nombre);
-            if (_cmbDepartamento.Items.Count > 0) _cmbDepartamento.SelectedIndex = 0;
-            _pnlDepartamento.Controls.Add(_cmbDepartamento);
-            scroll.Controls.Add(_pnlDepartamento);
-            y += 88;
-
-            // ── Tipo de mensaje ────────────────────────────────
-            new Label { Text = "Tipo:", Location = new Point(20, y), AutoSize = true, ForeColor = Colores.TextoSecundario, Font = new Font("Segoe UI", 9, FontStyle.Bold) }.Parent = scroll;
-            _cmbTipo = new ComboBox { Location = new Point(20, y + 20), Size = new Size(200, 30), DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 10) };
-            _cmbTipo.Items.AddRange(new object[] { "Mensaje", "Tarea", "Alerta" });
-            _cmbTipo.SelectedIndex = _tipoInicial == TipoMensaje.Tarea ? 1 : _tipoInicial == TipoMensaje.Alerta ? 2 : 0;
-            scroll.Controls.Add(_cmbTipo);
-            y += 62;
-
-            // ── Asunto ─────────────────────────────────────────
-            new Label { Text = "Asunto:", Location = new Point(20, y), AutoSize = true, ForeColor = Colores.TextoSecundario, Font = new Font("Segoe UI", 9, FontStyle.Bold) }.Parent = scroll;
-            _txtAsunto = new TextBox { Location = new Point(20, y + 20), Size = new Size(510, 30), Font = new Font("Segoe UI", 10), BorderStyle = BorderStyle.FixedSingle };
-            if (asunto != null) _txtAsunto.Text = asunto;
-            scroll.Controls.Add(_txtAsunto);
-            y += 62;
-
-            // ── Fecha límite ───────────────────────────────────
-            _chkVencimiento = new CheckBox { Text = "Fecha límite:", Location = new Point(20, y), AutoSize = true, Font = new Font("Segoe UI", 9, FontStyle.Bold), ForeColor = Colores.TextoSecundario };
-            _dtpVencimiento = new DateTimePicker { Location = new Point(145, y - 3), Size = new Size(200, 28), Format = DateTimePickerFormat.Short, Enabled = false };
-            _chkVencimiento.CheckedChanged += (s, e) => _dtpVencimiento.Enabled = _chkVencimiento.Checked;
-            scroll.Controls.Add(_chkVencimiento);
-            scroll.Controls.Add(_dtpVencimiento);
-            y += 38;
-
-            // ── Contenido ──────────────────────────────────────
-            new Label { Text = "Contenido:", Location = new Point(20, y), AutoSize = true, ForeColor = Colores.TextoSecundario, Font = new Font("Segoe UI", 9, FontStyle.Bold) }.Parent = scroll;
-            _txtContenido = new RichTextBox { Location = new Point(20, y + 22), Size = new Size(510, 140), Font = new Font("Segoe UI", 10.5f), BorderStyle = BorderStyle.FixedSingle, ScrollBars = RichTextBoxScrollBars.Vertical };
-            scroll.Controls.Add(_txtContenido);
-            y += 180;
-
-            // ── Botones ────────────────────────────────────────
-            var btnEnviar = new Button { Text = "📤  Enviar", Location = new Point(20, y + 10), Size = new Size(130, 42), BackColor = Colores.Secundario, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 11, FontStyle.Bold), Cursor = Cursors.Hand };
-            btnEnviar.FlatAppearance.BorderSize = 0;
-            btnEnviar.Click += BtnEnviar_Click;
-            var btnCancelar = new Button { Text = "Cancelar", Location = new Point(165, y + 10), Size = new Size(100, 42), FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10), Cursor = Cursors.Hand };
-            btnCancelar.Click += (s, e) => this.Close();
-            scroll.Controls.Add(btnEnviar);
-            scroll.Controls.Add(btnCancelar);
-
-            this.Controls.Add(scroll);
-            this.Controls.Add(pnlHeader);
+            Controls.Add(footer);
+            Controls.Add(layout);
         }
 
-        private void AlternarDestino()
+        private void Alternar()
         {
-            _pnlIndividual.Visible   = _rbIndividual.Checked;
-            _pnlDepartamento.Visible = _rbDepartamento.Checked;
+            _cmbUser.Visible = _rbIndividual.Checked;
+            _cmbDepto.Visible = _rbDepto.Checked;
         }
 
-        private void BtnEnviar_Click(object? sender, EventArgs e)
+        private void Enviar()
         {
-            bool esGrupal = _rbDepartamento.Checked;
-
-            if (esGrupal && _cmbDepartamento.SelectedItem == null)
-            { MessageBox.Show("Seleccione un departamento.", "Validación", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            if (!esGrupal && (_cmbDestinatario.SelectedItem is not ComboItem))
-            { MessageBox.Show("Seleccione un destinatario válido.", "Validación", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-            if (string.IsNullOrWhiteSpace(_txtAsunto.Text) || string.IsNullOrWhiteSpace(_txtContenido.Text))
-            { MessageBox.Show("Complete todos los campos.", "Validación", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-
-            int tipoIdx = _cmbTipo.SelectedIndex;
-            TipoMensaje tipo = tipoIdx == 1 ? TipoMensaje.Tarea : tipoIdx == 2 ? TipoMensaje.Alerta : TipoMensaje.Mensaje;
-
-            if (esGrupal)
+            if (string.IsNullOrWhiteSpace(_txtAsunto.Text) || string.IsNullOrWhiteSpace(_txtCuerpo.Text))
             {
-                string dept    = _cmbDepartamento.SelectedItem!.ToString()!;
-                var miembros   = DataManager.ObtenerUsuarios()
+                MessageBox.Show("Complete asunto y texto.");
+                return;
+            }
+            int t = _cmbTipo.SelectedIndex;
+            var tipo = t == 1 ? TipoMensaje.Tarea : t == 2 ? TipoMensaje.Alerta : TipoMensaje.Mensaje;
+            DateTime? vence = _chkVence.Checked ? _dtpVence.Value : null;
+
+            if (_rbDepto.Checked)
+            {
+                if (_cmbDepto.SelectedItem == null) return;
+                string dept = _cmbDepto.SelectedItem.ToString()!;
+                var miembros = DataManager.ObtenerUsuarios()
                     .Where(u => u.Activo && u.Departamento == dept && u.Id != Session.UsuarioActual?.Id).ToList();
-
                 if (miembros.Count == 0)
-                { MessageBox.Show("No hay usuarios activos en ese departamento.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Information); return; }
-
-                foreach (var miembro in miembros)
-                    DataManager.AgregarMensaje(new Mensaje
-                    {
-                        RemitenteId = Session.UsuarioActual!.Id, RemitenteNombre = Session.UsuarioActual.NombreCompleto,
-                        TipoDestino = TipoDestino.Departamento,
-                        DestinatarioId = miembro.Id, DestinatarioNombre = miembro.NombreCompleto,
-                        DepartamentoDestino = dept, Asunto = _txtAsunto.Text.Trim(),
-                        Contenido = _txtContenido.Text.Trim(), Tipo = tipo,
-                        FechaVencimiento = _chkVencimiento.Checked ? _dtpVencimiento.Value : null
-                    });
-
-                MessageBox.Show($"✅ Mensaje enviado a {miembros.Count} miembro(s) de {dept}.", "Éxito", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                {
+                    MessageBox.Show("Sin usuarios en ese departamento.");
+                    return;
+                }
+                foreach (var m in miembros)
+                    DataManager.AgregarMensaje(CrearMensaje(m.Id, m.NombreCompleto, TipoDestino.Departamento, dept, tipo, vence));
             }
             else
             {
-                var dest = (_cmbDestinatario.SelectedItem as ComboItem)!;
-                DataManager.AgregarMensaje(new Mensaje
+                if (_cmbUser.SelectedItem is not ComboItem dest)
                 {
-                    RemitenteId = Session.UsuarioActual!.Id, RemitenteNombre = Session.UsuarioActual.NombreCompleto,
-                    TipoDestino = TipoDestino.Individual,
-                    DestinatarioId = dest.Id, DestinatarioNombre = dest.Nombre,
-                    Asunto = _txtAsunto.Text.Trim(), Contenido = _txtContenido.Text.Trim(),
-                    Tipo = tipo, FechaVencimiento = _chkVencimiento.Checked ? _dtpVencimiento.Value : null
-                });
-                MessageBox.Show("✅ Mensaje enviado correctamente.", "Éxito", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show("Seleccione destinatario.");
+                    return;
+                }
+                DataManager.AgregarMensaje(CrearMensaje(dest.Id, dest.Nombre, TipoDestino.Individual, null, tipo, vence));
             }
-            this.Close();
+            Close();
         }
+
+        private Mensaje CrearMensaje(string destId, string destNombre, TipoDestino td, string? dept, TipoMensaje tipo, DateTime? vence) =>
+            new Mensaje
+            {
+                RemitenteId = Session.UsuarioActual!.Id,
+                RemitenteNombre = Session.UsuarioActual.NombreCompleto,
+                TipoDestino = td,
+                DestinatarioId = destId,
+                DestinatarioNombre = destNombre,
+                DepartamentoDestino = dept,
+                Asunto = _txtAsunto.Text.Trim(),
+                Contenido = _txtCuerpo.Text.Trim(),
+                Tipo = tipo,
+                FechaVencimiento = vence
+            };
     }
 
-    // ─────────────────────────────────────────────────────────
-    //  Visor del grafo
-    // ─────────────────────────────────────────────────────────
     public class GrafoMensajeriaForm : Form
     {
         public GrafoMensajeriaForm()
         {
-            this.Text = "📊 Grafo de Mensajería"; this.Size = new Size(900, 640);
-            this.StartPosition = FormStartPosition.CenterParent; this.BackColor = Colores.Fondo;
-            this.Font = new Font("Segoe UI", 9.5f);
-            InitUI();
-        }
+            Text = "Grafo";
+            Size = new System.Drawing.Size(700, 400);
+            StartPosition = FormStartPosition.CenterParent;
 
-        private void InitUI()
-        {
-            var pnlHeader = new Panel { Dock = DockStyle.Top, Height = 55, BackColor = Colores.Primario };
-            new Label { Text = "📊 Grafo Dirigido Ponderado — Mensajería entre Usuarios", Font = new Font("Segoe UI", 12, FontStyle.Bold), ForeColor = Color.White, Location = new Point(15, 15), AutoSize = true }.Parent = pnlHeader;
-
-            var dgv = new DataGridView { Dock = DockStyle.Fill, BackgroundColor = Color.White, BorderStyle = BorderStyle.None, RowHeadersVisible = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, ReadOnly = true, AllowUserToAddRows = false, Font = new Font("Segoe UI", 9.5f), ColumnHeadersHeight = 42, RowTemplate = { Height = 36 }, SelectionMode = DataGridViewSelectionMode.FullRowSelect, ScrollBars = ScrollBars.Both };
-            dgv.ColumnHeadersDefaultCellStyle.BackColor = Colores.Primario;
-            dgv.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
-            dgv.ColumnHeadersDefaultCellStyle.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
-            dgv.EnableHeadersVisualStyles = false;
-            dgv.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 250, 252);
-
-            dgv.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Remitente (A)",        FillWeight = 160 });
-            dgv.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Dept. Remitente",      FillWeight = 130 });
-            dgv.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Destinatario (B)",     FillWeight = 160 });
-            dgv.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Dept. Destinatario",   FillWeight = 130 });
-            dgv.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "⚖️ Peso (A→B)",       FillWeight = 110 });
-            dgv.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Última interacción",   FillWeight = 150 });
-
-            var aristas = DataManager.ObtenerGrafo();
-            foreach (var a in aristas)
-                dgv.Rows.Add(a.RemitenteNombre, a.RemitenteDepartamento,
-                             a.DestinatarioNombre, a.DestinatarioDepartamento,
-                             a.Peso, a.UltimaInteraccion.ToString("dd/MM/yyyy HH:mm"));
-            if (aristas.Count == 0) dgv.Rows.Add("—", "—", "—", "—", "Sin datos", "—");
-
-            var pnlStats = new Panel { Dock = DockStyle.Bottom, Height = 50, BackColor = Color.White };
-            pnlStats.Paint += (s, e) => e.Graphics.DrawLine(new Pen(Color.FromArgb(226, 232, 240)), 0, 0, pnlStats.Width, 0);
-            int totalMsgs = aristas.Sum(a => a.Peso);
-            new Label { Text = $"  Aristas: {aristas.Count}   |   Mensajes en grafo: {totalMsgs}", Font = new Font("Segoe UI", 9), ForeColor = Colores.TextoSecundario, Location = new Point(10, 15), AutoSize = true }.Parent = pnlStats;
-
-            this.Controls.Add(dgv);
-            this.Controls.Add(pnlStats);
-            this.Controls.Add(pnlHeader);
+            var grid = MinimalUi.CreateGrid();
+            grid.Columns.Add("De", "De");
+            grid.Columns.Add("A", "A");
+            grid.Columns.Add("Peso", "Peso");
+            grid.Columns.Add("Fecha", "Fecha");
+            foreach (var a in DataManager.ObtenerGrafo())
+                grid.Rows.Add(a.RemitenteNombre, a.DestinatarioNombre, a.Peso, a.UltimaInteraccion.ToString("dd/MM/yyyy"));
+            Controls.Add(grid);
         }
     }
 
-    // ─────────────────────────────────────────────────────────
-    //  Helpers compartidos
-    // ─────────────────────────────────────────────────────────
     public class ComboItem
     {
-        public string Id     { get; }
+        public string Id { get; }
         public string Nombre { get; }
         public ComboItem(string id, string nombre) { Id = id; Nombre = nombre; }
         public override string ToString() => Nombre;
-    }
-
-    /// <summary>Ítem separador visual en el ComboBox (no seleccionable).</summary>
-    public class ComboSeparador
-    {
-        public string Texto { get; }
-        public ComboSeparador(string texto) { Texto = texto; }
-        public override string ToString() => Texto;
     }
 
     public class EnviarMensajeControl : UserControl
     {
         public EnviarMensajeControl()
         {
-            this.BackColor = Colores.Fondo;
+            Dock = DockStyle.Fill;
             if (!Session.EsAdmin)
             {
-                this.Controls.Add(new Label
-                {
-                    Text = "⛔ Solo los administradores pueden enviar comunicados.",
-                    Font = new Font("Segoe UI", 12, FontStyle.Bold),
-                    ForeColor = Colores.Alerta,
-                    Dock = DockStyle.Fill,
-                    TextAlign = ContentAlignment.MiddleCenter
-                });
+                Controls.Add(new Label { Text = "Solo administradores.", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter });
                 return;
             }
-            var form = new EnviarMensajeForm(null, null, null, TipoMensaje.Mensaje)
-            { TopLevel = false, FormBorderStyle = FormBorderStyle.None, Dock = DockStyle.Fill, Visible = true };
-            this.Controls.Add(form);
+            var f = new EnviarMensajeForm(null, null, null, TipoMensaje.Mensaje)
+            {
+                TopLevel = false,
+                FormBorderStyle = FormBorderStyle.None,
+                Dock = DockStyle.Fill
+            };
+            Controls.Add(f);
+            f.Show();
         }
     }
 }

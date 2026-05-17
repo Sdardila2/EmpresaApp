@@ -20,17 +20,14 @@ namespace EmpresaApp
 
             if (connGuardada != null)
             {
-                // Only validate if there is actually a saved connection string
-                var lanValidator = LANNetworkValidator.Instance;
-
-                if (!ConexionValida(connGuardada) || !lanValidator.ValidateDatabaseServer(connGuardada))
+                string? error = ValidarConexionGuardada(connGuardada);
+                if (error != null)
                 {
                     connGuardada = null;
                     ServerConfig.EliminarServidor();
                     MessageBox.Show(
-                        "La conexión guardada ya no es válida o el servidor no está en la LAN.\n" +
-                        "Por favor configura el servidor nuevamente.",
-                        "Conexión perdida", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        error + "\n\nConfigure el servidor de nuevo.",
+                        "Conexion", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 else
                 {
@@ -51,15 +48,15 @@ namespace EmpresaApp
             // ── Paso 2: Inicializar DataManager y SyncService ──
             DataManager.Inicializar(DbConfig.ConnectionString);
 
-            // ── Paso 3: Login normal ────────────────────────────────────
-            var loginForm = new LoginFormModern();
+            var loginForm = new LoginForm();
             if (loginForm.ShowDialog() == DialogResult.OK)
-            {
-                Application.Run(new DashboardFormModern());
-            }
+                Application.Run(new DashboardForm());
         }
 
-        private static bool ConexionValida(string connStr)
+        /// <summary>
+        /// null si la conexion es valida; mensaje de error si no.
+        /// </summary>
+        private static string? ValidarConexionGuardada(string connStr)
         {
             try
             {
@@ -67,10 +64,25 @@ namespace EmpresaApp
                 conn.Open();
                 using var cmd = conn.CreateCommand();
                 cmd.CommandText = "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME='Usuarios'";
-                cmd.CommandTimeout = 5;
-                return (int)cmd.ExecuteScalar()! > 0;
+                cmd.CommandTimeout = 10;
+                if ((int)cmd.ExecuteScalar()! == 0)
+                    return "La base de datos no tiene el esquema de EmpresaApp (tabla Usuarios).";
+
+                var validator = LANNetworkValidator.Instance;
+                var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connStr);
+                if (!validator.IsLocalSqlServer(builder.DataSource ?? ""))
+                {
+                    var ip = validator.ExtractServerIP(connStr);
+                    if (!validator.IsIPOnLAN(ip))
+                        return "El servidor no esta en una red local permitida (" + ip + ").";
+                }
+
+                return null;
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                return "No se pudo conectar a SQL Server: " + ex.Message;
+            }
         }
     }
 }
