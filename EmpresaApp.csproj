@@ -9,7 +9,7 @@
     <RootNamespace>EmpresaApp</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Dapper"                      Version="2.1.35" />
-    <PackageReference Include="Microsoft.Data.SqlClient"    Version="5.2.2"  />
+    <PackageReference Include="Dapper" Version="2.1.35" />
+    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
   </ItemGroup>
 </Project>
