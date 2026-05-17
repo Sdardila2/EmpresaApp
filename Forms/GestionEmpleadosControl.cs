@@ -276,8 +276,10 @@ namespace EmpresaApp.Forms
         private void InitUI()
         {
             this.Text            = _usuarioExistente == null ? "Nuevo Empleado" : "Editar Empleado";
-            this.Size            = new Size(480, 615);
+            this.Size            = new Size(480, 650);
+            this.MinimumSize     = new Size(480, 400);
             this.AutoScroll      = true;
+            this.AutoScrollMargin = new Size(0, 20);
             this.StartPosition   = FormStartPosition.CenterParent;
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox     = false;

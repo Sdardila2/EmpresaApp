@@ -83,6 +83,30 @@ namespace EmpresaApp.Forms
             };
             panelMain.Controls.Add(btnConexion);
 
+            // ── Botón cambiar servidor ────────────────────────────
+            var btnCambiarServidor = new Button
+            {
+                Text = "🖥️  Cambiar servidor",
+                Location = new Point(40, 390),
+                Size = new Size(360, 30),
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8.5f),
+                ForeColor = Colores.TextoSecundario,
+                BackColor = Color.Transparent,
+                Cursor = Cursors.Hand
+            };
+            btnCambiarServidor.FlatAppearance.BorderSize = 0;
+            btnCambiarServidor.Click += (s, e) =>
+            {
+                EmpresaApp.Data.ServerConfig.EliminarServidor();
+                var dlg = new ServidorForm();
+                if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                {
+                    // Refrescar el hint de conexión en el label
+                }
+            };
+            panelMain.Controls.Add(btnCambiarServidor);
+
             this.Controls.Add(panelMain);
             this.Controls.Add(pnlHeader);
         }
