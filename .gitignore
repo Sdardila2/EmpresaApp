@@ -1,4 +1,4 @@
 bin
 obj
 .vs
-/EmpresaApp.sln
+EmpresaApp.csproj.user
