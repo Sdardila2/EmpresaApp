@@ -21,7 +21,7 @@ namespace EmpresaApp.Forms
         private void InitializeComponent()
         {
             this.Text            = "EmpresaApp - Iniciar Sesión";
-            this.Size            = new Size(460, 620);
+            this.Size            = new Size(460, 640);
             this.StartPosition   = FormStartPosition.CenterScreen;
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox     = false;
@@ -60,8 +60,6 @@ namespace EmpresaApp.Forms
             btnLogin.FlatAppearance.BorderSize = 0;
             btnLogin.Click += BtnLogin_Click;
             panelMain.Controls.Add(btnLogin);
-
-            new Label { Text = "Admin por defecto: admin / admin123", Location = new Point(40, 315), Size = new Size(360, 20), ForeColor = Colores.TextoSecundario, Font = new Font("Segoe UI", 8), TextAlign = ContentAlignment.MiddleCenter }.Parent = panelMain;
 
             // ── Botón configurar conexión ─────────────────────
             var btnConexion = new Button
